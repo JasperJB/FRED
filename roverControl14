@@ -1,0 +1,151 @@
+from evdev import InputDevice, list_devices, categorize, ecodes
+from gpiozero import PWMOutputDevice, OutputDevice
+import smbus2
+import struct
+import csv
+import time
+
+# GPIO Pin Definitions
+ENA = PWMOutputDevice(12)  # PWM for right motors
+ENB = PWMOutputDevice(13)  # PWM for left motors
+IN1 = OutputDevice(17)  # Right motor reverse
+IN2 = OutputDevice(18)  # Right motor forward
+IN3 = OutputDevice(27)  # Left motor reverse
+IN4 = OutputDevice(22)  # Left motor forward
+
+# I2C Settings
+ARDUINO_ADDRESS = 0x08  # Arduino's I2C slave address
+bus = smbus2.SMBus(1)   # Use I2C bus 1 (default for Raspberry Pi)
+
+# CSV File Setup
+csv_file = "rover_data_log.csv"
+with open(csv_file, mode='w', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerow(["Left Motor Speed", "Right Motor Speed", "Direction",
+                     "IMU1_X", "IMU1_Y", "IMU1_Z",
+                     "IMU2_X", "IMU2_Y", "IMU2_Z",
+                     "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6"])
+
+# Map joystick values to motor control values
+def map_value(value, in_min, in_max, out_min, out_max):
+    """Map a joystick value to motor speed."""
+    mapped_value = int((value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min)
+    if -10 <= mapped_value <= 10:  # Dead zone
+        return 0
+    return mapped_value
+
+# Motor control function
+def set_motor_speed(motor_pwm, motor_fwd, motor_rev, speed):
+    """Set the motor speed and direction."""
+    if speed > 0:
+        motor_fwd.on()
+        motor_rev.off()
+        motor_pwm.value = abs(speed) / 255.0
+    elif speed < 0:
+        motor_fwd.off()
+        motor_rev.on()
+        motor_pwm.value = abs(speed) / 255.0
+    else:
+        motor_fwd.off()
+        motor_rev.off()
+        motor_pwm.value = 0
+
+# Read data from Arduino via I2C
+def read_from_arduino():
+    """Reads IMU and sensor data from Arduino."""
+    try:
+        # Request 24 bytes of data (12 for IMUs, 12 for sensors)
+        data = bus.read_i2c_block_data(ARDUINO_ADDRESS, 0, 24)
+
+        # Unpack IMU data
+        imu1 = struct.unpack(">hhh", bytes(data[:6]))
+        imu2 = struct.unpack(">hhh", bytes(data[6:12]))
+
+        # Unpack sensor data
+        sensors = [struct.unpack(">H", bytes(data[i:i+2]))[0] for i in range(12, 24, 2)]
+
+        return imu1, imu2, sensors
+    except Exception as e:
+        print(f"Error reading from Arduino: {e}")
+        return None, None, None
+
+# Find the PS4 controller
+def find_ps4_controller():
+    devices = [InputDevice(path) for path in list_devices()]
+    for device in devices:
+        if 'Wireless Controller' in device.name:
+            return device
+    return None
+
+# Log data to CSV
+def log_to_csv(left_speed, right_speed, direction, imu1, imu2, sensors):
+    with open(csv_file, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([left_speed, right_speed, direction,
+                         imu1[0], imu1[1], imu1[2],
+                         imu2[0], imu2[1], imu2[2],
+                         *sensors])
+
+# Main function
+def main():
+    ps4_controller = find_ps4_controller()
+
+    if not ps4_controller:
+        print("PS4 controller not found. Make sure it is connected via Bluetooth.")
+        return
+
+    print(f"Controller found: {ps4_controller.name}")
+    left_y = 0
+    right_y = 0
+
+    try:
+        for event in ps4_controller.read_loop():
+            if event.type == ecodes.EV_ABS:
+                absevent = categorize(event)
+
+                # Map joystick inputs to motor values
+                if event.code == ecodes.ABS_Y:  # Left stick (vertical)
+                    left_y = map_value(absevent.event.value, 0, 255, -255, 255)
+                    print(f"Left stick value: {left_y}")
+                elif event.code == ecodes.ABS_RY:  # Right stick (vertical)
+                    right_y = map_value(absevent.event.value, 0, 255, -255, 255)
+                    print(f"Right stick value: {right_y}")
+
+                # Set motor speeds based on joystick values
+                set_motor_speed(ENB, IN3, IN4, left_y)  # Left motor
+                set_motor_speed(ENA, IN1, IN2, right_y)  # Right motor
+
+                # Determine direction
+                if left_y > 0 and right_y > 0:
+                    direction = "Backward"
+                elif left_y < 0 and right_y < 0:
+                    direction = "Forward"
+                elif left_y > 0 and right_y < 0:
+                    direction = "Right"
+                elif left_y < 0 and right_y > 0:
+                    direction = "Left"
+                else:
+                    direction = "Stopped"
+
+                # Read Arduino IMU and sensor data
+                imu1, imu2, sensors = read_from_arduino()
+
+                if imu1 and imu2 and sensors:
+                    # Log all data to CSV
+                    log_to_csv(left_y, right_y, direction, imu1, imu2, sensors)
+
+                    # Print data to terminal for debugging
+                    print(f"\nDirection: {direction}")
+                    print(f"IMU1 Data: X={imu1[0]}, Y={imu1[1]}, Z={imu1[2]}")
+                    print(f"IMU2 Data: X={imu2[0]}, Y={imu2[1]}, Z={imu2[2]}")
+                    print(f"Arduino Sensors: {sensors}")
+                else:
+                    print("Failed to read data from Arduino.")
+
+    except KeyboardInterrupt:
+        print("Stopping motors and exiting.")
+        set_motor_speed(ENB, IN3, IN4, 0)
+        set_motor_speed(ENA, IN1, IN2, 0)
+
+if __name__ == "__main__":
+    main()
