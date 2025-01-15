@@ -1,0 +1,179 @@
+#include <Wire.h>
+ 
+// Define IMU I2C addresses
+#define IMU1_ADDRESS 0x68
+#define IMU2_ADDRESS 0x69
+ 
+// Define I2C Slave Address for Raspberry Pi communication
+#define SLAVE_ADDRESS 8
+ 
+// Define sensor pins
+#define TRIG_PIN 5
+#define ECHO_PIN_1 2
+#define ECHO_PIN_2 3
+#define ECHO_PIN_3 4
+#define ECHO_PIN_4 6
+#define ECHO_PIN_5 7
+#define ECHO_PIN_6 8
+ 
+// IMU data arrays
+int16_t imu1_data[3] = {0, 0, 0};
+int16_t imu2_data[3] = {0, 0, 0};
+ 
+// Ultrasonic sensor distances
+uint16_t distances[6] = {0, 0, 0, 0, 0, 0};
+ 
+void setup() {
+  // Initialize Serial for debugging
+  Serial.begin(115200);
+  while (!Serial) {}
+  Serial.println("Starting Arduino...");
+ 
+  // Initialize I2C for Raspberry Pi communication (slave mode)
+  Wire.begin(SLAVE_ADDRESS);  // Default I2C pins (SDA/SCL)
+  Wire.onRequest(requestEvent);  // Register request event handler
+  Serial.println("I2C initialized for Raspberry Pi communication (Slave mode).");
+ 
+  // Initialize I2C for IMU communication (master mode) on custom pins
+  Wire1.begin(A3, A0);  // A3 as SDA, A0 as SCL
+  Wire1.setClock(100000);  // Set I2C clock speed to 100kHz
+  Serial.println("I2C initialized for IMU communication on A3 (SDA) and A0 (SCL).");
+ 
+  // Initialize ultrasonic sensor pins
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN_1, INPUT);
+  pinMode(ECHO_PIN_2, INPUT);
+  pinMode(ECHO_PIN_3, INPUT);
+  pinMode(ECHO_PIN_4, INPUT);
+  pinMode(ECHO_PIN_5, INPUT);
+  pinMode(ECHO_PIN_6, INPUT);
+ 
+  // Initialize IMUs
+  initializeIMU(IMU1_ADDRESS);
+  initializeIMU(IMU2_ADDRESS);
+ 
+  Serial.println("Arduino is ready.");
+}
+ 
+void loop() {
+  // Read data from IMUs with a delay between readings
+  readIMUData(IMU1_ADDRESS, imu1_data);
+  delay(50);  // 50ms delay to avoid interference
+  readIMUData(IMU2_ADDRESS, imu2_data);
+ 
+  // Measure distances from ultrasonic sensors with delays
+  distances[0] = measureDistance(TRIG_PIN, ECHO_PIN_1);
+  delay(50);  // 50ms delay between sensor measurements
+  distances[1] = measureDistance(TRIG_PIN, ECHO_PIN_2);
+  delay(50);
+  distances[2] = measureDistance(TRIG_PIN, ECHO_PIN_3);
+  delay(50);
+  distances[3] = measureDistance(TRIG_PIN, ECHO_PIN_4);
+  delay(50);
+  distances[4] = measureDistance(TRIG_PIN, ECHO_PIN_5);
+  delay(50);
+  distances[5] = measureDistance(TRIG_PIN, ECHO_PIN_6);
+ 
+  // Debug output to Serial Monitor
+  Serial.println("\nIMU1 Data (X, Y, Z):");
+  Serial.print("  X: "); Serial.print(imu1_data[0]); Serial.println(" m/s²");
+  Serial.print("  Y: "); Serial.print(imu1_data[1]); Serial.println(" m/s²");
+  Serial.print("  Z: "); Serial.print(imu1_data[2]); Serial.println(" m/s²");
+ 
+  Serial.println("\nIMU2 Data (X, Y, Z):");
+  Serial.print("  X: "); Serial.print(imu2_data[0]); Serial.println(" m/s²");
+  Serial.print("  Y: "); Serial.print(imu2_data[1]); Serial.println(" m/s²");
+  Serial.print("  Z: "); Serial.print(imu2_data[2]); Serial.println(" m/s²");
+ 
+  Serial.println("\nUltrasonic Sensor Distances (cm):");
+  for (int i = 0; i < 6; i++) {
+    Serial.print("  Sensor ");
+    Serial.print(i + 1);
+    Serial.print(": ");
+    Serial.print(distances[i]);
+    Serial.println(" cm");
+  }
+ 
+  Serial.println("\n---------------------------------------\n");
+  delay(500);  // Delay for readability
+}
+ 
+void initializeIMU(uint8_t imu_address) {
+  Serial.print("Initializing IMU at address 0x");
+  Serial.println(imu_address, HEX);
+ 
+  // Wake up the MPU6050
+  Wire1.beginTransmission(imu_address);
+  Wire1.write(0x6B);  // Power management register
+  Wire1.write(0);     // Set to 0 to wake up
+  if (Wire1.endTransmission() != 0) {
+    Serial.print("Failed to initialize IMU at address 0x");
+    Serial.println(imu_address, HEX);
+  } else {
+    Serial.print("IMU at address 0x");
+    Serial.print(imu_address, HEX);
+    Serial.println(" initialized successfully.");
+  }
+}
+ 
+void readIMUData(uint8_t imu_address, int16_t *imu_data) {
+  Wire1.beginTransmission(imu_address);
+  Wire1.write(0x3B);  // Register to start reading accelerometer data
+  if (Wire1.endTransmission(false) != 0) {
+    Serial.print("Failed to read from IMU at address 0x");
+    Serial.println(imu_address, HEX);
+    imu_data[0] = imu_data[1] = imu_data[2] = -1;
+    return;
+  }
+ 
+  Wire1.requestFrom(imu_address, 6);  // Request 6 bytes for X, Y, Z axes
+ 
+  if (Wire1.available() < 6) {
+    Serial.print("Incomplete data from IMU at address 0x");
+    Serial.println(imu_address, HEX);
+    imu_data[0] = imu_data[1] = imu_data[2] = -1;
+    return;
+  }
+ 
+  imu_data[0] = (Wire1.read() << 8) | Wire1.read();  // X-axis
+  imu_data[1] = (Wire1.read() << 8) | Wire1.read();  // Y-axis
+  imu_data[2] = (Wire1.read() << 8) | Wire1.read();  // Z-axis
+}
+ 
+long measureDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+ 
+  long duration = pulseIn(echoPin, HIGH, 30000);  // 30ms timeout
+  if (duration == 0) return 0;  // Invalid reading
+  return duration * 0.034 / 2;  // Convert duration to distance (cm)
+}
+ 
+void requestEvent() {
+  uint8_t buffer[24];  // Buffer to hold IMU and sensor data
+ 
+  // Pack IMU1 data into the buffer
+  int index = 0;
+  for (int i = 0; i < 3; i++) {
+    buffer[index++] = (imu1_data[i] >> 8) & 0xFF;  // High byte
+    buffer[index++] = imu1_data[i] & 0xFF;         // Low byte
+  }
+ 
+  // Pack IMU2 data into the buffer
+  for (int i = 0; i < 3; i++) {
+    buffer[index++] = (imu2_data[i] >> 8) & 0xFF;  // High byte
+    buffer[index++] = imu2_data[i] & 0xFF;         // Low byte
+  }
+ 
+  // Pack ultrasonic sensor data into the buffer
+  for (int i = 0; i < 6; i++) {
+    buffer[index++] = (distances[i] >> 8) & 0xFF;  // High byte
+    buffer[index++] = distances[i] & 0xFF;         // Low byte
+  }
+ 
+  // Send the buffer to the Raspberry Pi
+  Wire.write(buffer, sizeof(buffer));
+}
