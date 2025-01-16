@@ -1,8 +1,9 @@
 #include <Wire.h>
 
-// Define IMU I2C addresses
+// Define I2C addresses and slave configurations
 #define IMU1_ADDRESS 0x68 // AD0 connected to GND
 #define IMU2_ADDRESS 0x69 // AD0 connected to 3.3V
+#define SLAVE_ADDRESS 0x08 // I2C slave address for Arduino
 
 // Sonar sensor pins
 #define TRIG_PIN 5
@@ -19,17 +20,24 @@ const float ACCEL_SENSITIVITY = 16384.0; // ±2g
 const float GYRO_SENSITIVITY = 131.0;    // ±250 dps
 const float GRAVITY = 9.8;               // m/s²
 
+// Debugging flag
+#define DEBUG 1
+
 void setup() {
-  // Start serial communication
-  Serial.begin(115200);
-  while (!Serial) {}
-  Serial.println("Starting Arduino...");
+  if (DEBUG) {
+    Serial.begin(115200);
+    // Instead of blocking, notify if Serial isn't available
+    if (!Serial) {
+      // Optional: Add a short delay to ensure compatibility with devices
+      delay(1000);
+    }
+  }
 
   // Initialize I2C buses
-  Wire.begin(0x08); // Slave address for Raspberry Pi communication
+  Wire.begin(SLAVE_ADDRESS); // Set Arduino as I2C slave
   Wire.onRequest(requestEvent);
   Wire1.begin(A3, A0); // SDA = A3, SCL = A0 for IMUs
-  Wire1.setClock(400000);
+  Wire1.setClock(100000);
 
   // Initialize sonar pins
   pinMode(TRIG_PIN, OUTPUT);
@@ -38,7 +46,11 @@ void setup() {
   // Initialize IMUs
   initializeIMU(IMU1_ADDRESS);
   initializeIMU(IMU2_ADDRESS);
-  Serial.println("IMUs initialized.");
+
+  // Optionally log initialization success
+  if (DEBUG && Serial) {
+    Serial.println("IMUs initialized.");
+  }
 }
 
 void loop() {
@@ -52,11 +64,13 @@ void loop() {
   // Read sonar data
   readSonarData();
 
-  // Print averaged IMU data
-  printAveragedIMUData();
+  if (DEBUG) {
+    // Print averaged IMU data
+    printAveragedIMUData();
 
-  // Print sonar data
-  printSonarData();
+    // Print sonar data
+    printSonarData();
+  }
 
   delay(500); // Adjust as needed
 }
