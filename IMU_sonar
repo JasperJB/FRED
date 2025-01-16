@@ -1,0 +1,57 @@
+import smbus
+import time
+
+# Define I2C bus and Arduino slave address
+I2C_BUS = 1
+ARDUINO_ADDRESS = 0x08
+
+# Initialize I2C bus
+bus = smbus.SMBus(I2C_BUS)
+
+def read_data():
+    try:
+        # Read 30 bytes from Arduino (IMU + sonar data)
+        data = bus.read_i2c_block_data(ARDUINO_ADDRESS, 0, 30)
+
+        # Extract IMU data (averaged)
+        avg_ax_mps2 = ((data[0] << 8) | data[1]) / 100.0
+        avg_ay_mps2 = ((data[2] << 8) | data[3]) / 100.0
+        avg_az_mps2 = ((data[4] << 8) | data[5]) / 100.0
+        avg_gx_dps = ((data[6] << 8) | data[7]) / 100.0
+        avg_gy_dps = ((data[8] << 8) | data[9]) / 100.0
+        avg_gz_dps = ((data[10] << 8) | data[11]) / 100.0
+
+        # Extract sonar data
+        sonar_distances = []
+        for i in range(6):
+            distance = (data[12 + i * 2] << 8) | data[13 + i * 2]
+            sonar_distances.append(distance)
+
+        return avg_ax_mps2, avg_ay_mps2, avg_az_mps2, avg_gx_dps, avg_gy_dps, avg_gz_dps, sonar_distances
+
+    except Exception as e:
+        print(f"Error reading data: {e}")
+        return None
+
+def display_data():
+    while True:
+        result = read_data()
+        if result:
+            avg_ax_mps2, avg_ay_mps2, avg_az_mps2, avg_gx_dps, avg_gy_dps, avg_gz_dps, sonar_distances = result
+
+            print("\nAveraged IMU Data:")
+            print(f"  Accel (m/sÂ²): {avg_ax_mps2:.2f}, {avg_ay_mps2:.2f}, {avg_az_mps2:.2f}")
+            print(f"  Gyro (dps): {avg_gx_dps:.2f}, {avg_gy_dps:.2f}, {avg_gz_dps:.2f}")
+
+            print("Sonar Distances (cm):")
+            for i, distance in enumerate(sonar_distances, start=1):
+                print(f"  Sensor {i}: {distance} cm")
+
+        time.sleep(0.5)  # Match Arduino's loop timing
+
+if __name__ == "__main__":
+    print("Starting Raspberry Pi I2C Data Reader...")
+    try:
+        display_data()
+    except KeyboardInterrupt:
+        print("\nExiting...")
