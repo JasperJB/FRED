@@ -28,7 +28,6 @@ void setup() {
     Serial.begin(115200);
     // Instead of blocking, notify if Serial isn't available
     if (!Serial) {
-      // Optional: Add a short delay to ensure compatibility with devices
       delay(1000);
     }
   }
@@ -47,7 +46,6 @@ void setup() {
   initializeIMU(IMU1_ADDRESS);
   initializeIMU(IMU2_ADDRESS);
 
-  // Optionally log initialization success
   if (DEBUG && Serial) {
     Serial.println("IMUs initialized.");
   }
@@ -135,7 +133,7 @@ void printSonarData() {
 }
 
 void requestEvent() {
-  uint8_t buffer[18];
+  uint8_t buffer[30];
   int index = 0;
 
   // Add averaged IMU data
