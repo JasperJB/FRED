@@ -1,0 +1,4 @@
+Pinout for the arduino: 
+
+
+Pinout for the pi: 
